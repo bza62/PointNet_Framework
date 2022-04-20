@@ -1,7 +1,7 @@
 from __future__ import print_function
 
 import copy
-
+from show3d_balls import showpoints
 import torch
 import torch.nn as nn
 import torch.nn.parallel
@@ -10,7 +10,7 @@ from torch.autograd import Variable
 import numpy as np
 import torch.nn.functional as F
 import torch.nn as nn
-from show3d_balls import showpoints
+#from show3d_balls import showpoints
 
 class TNet(nn.Module):
     def __init__(self, k=64):
@@ -85,7 +85,7 @@ class PointNetfeat(nn.Module):
 
         #TODO
         # layer 1:3 -> 64
-        self.layer1 = nn.Sequential(nn.Conv1d(3,64,1),nn.BatchNorm1d(64),nn.Linear(True))
+        self.layer1 = nn.Sequential(nn.Conv1d(3,64,1),nn.BatchNorm1d(64),nn.ReLU(True))
         #TODO
         # Use TNet to apply transformation on features and multiply the input features with the transformation 
         #                                                                        (if feature_transform is true)
@@ -96,40 +96,47 @@ class PointNetfeat(nn.Module):
         #TODO
         # layer 3: 128 -> 1024 (no relu)
         self.layer2_3 = nn.Sequential(
-            nn.Conv1d(64, 128, 1), nn.BatchNorm1d(128), nn.Linear(True),
+            nn.Conv1d(64, 128, 1), nn.BatchNorm1d(128), nn.ReLU(True),
             nn.Conv1d(128, 1024, 1), nn.BatchNorm1d(1024))
         #TODO
         # ReLU activation
-    def forward(self, x, show_critical = False):
+    def forward(self, x, show_critical_points = False):
         batch_size, _, num_points = x.shape
         #TODO
         # input transformation, you will need to return the transformation matrix as you will need it for the regularization loss
         input_trans = self.t_net3(x)
         x_original = x
-        x = torch.bmm(torch.transpose(x,(1,2)),input_trans)
-        x = torch.transpose(x,(1,2))
+        x = torch.bmm(torch.transpose(x,1,2),input_trans)
+        x = torch.transpose(x,1,2)
         #TODO
         # apply layer 1
         x = self.layer1(x)
         #TODO
         # feature transformation, you will need to return the transformation matrix as you will need it for the regularization loss
+        feature_trans = None
 
+        # print("feature_transform is ")
+        # print(self.feature_transform)
         if self.feature_transform:
+
             feature_trans = self.t_net64(x)
-            x = torch.bmm(torch.transpose(x, (1, 2)), feature_trans)
-            x = torch.transpose(x, (1, 2))
+            # print("feature_trans is ")
+            # print(feature_trans)
+            x = torch.bmm(torch.transpose(x, 1, 2), feature_trans)
+            x = torch.transpose(x, 1, 2)
+
         point_features = x
         #TODO
         # apply layer 2
         #TODO
-        # apply layer 3
+        # apply layer 3zbc89631412
         x = self.layer2_3(x)
         #TODO
         # apply maxpooling
         x,idx = torch.max(x, dim=2)
-        if show_critical:
-            critials = x_original.permute(0,2,1)[0,idx]
-            showpoints(critials[0].cpu().numpy())
+        if show_critical_points:
+            critical_points = x_original.permute(0,2,1)[0,idx]
+            showpoints(critical_points[0].cpu().numpy())
         #TODO
         # return output, input transformation matrix, feature transformation matrix
         if self.global_feat: # This shows if we're doing classification or segmentation
@@ -154,8 +161,8 @@ class PointNetCls(nn.Module):
         self.bn2 = nn.BatchNorm1d(256)
         self.relu = nn.ReLU()
 
-    def forward(self, x,show_critical=False):
-        x, trans, trans_feat = self.feat(x,show_critical)
+    def forward(self, x, show_critical_points):
+        x, trans, trans_feat = self.feat(x,show_critical_points)
         x = F.relu(self.bn1(self.fc1(x)))
         x = F.relu(self.bn2(self.dropout(self.fc2(x))))
         x = self.fc3(x)
@@ -220,7 +227,7 @@ def feature_transform_regularizer(trans):
     # compute norm
     if trans.is_cuda:
         I = I.cuda()
-    I_AAT = I - torch.bmm(trans,torch.transpose(trans,(1,2)))
+    I_AAT = I - torch.bmm(trans,torch.transpose(trans,1,2))
     norm = torch.norm(I_AAT,dim = (1,2))
     #TODO
     # compute mean norms and return

@@ -16,17 +16,17 @@ import numpy as np
 parser = argparse.ArgumentParser()
 parser.add_argument('--batchSize', type=int, default=8, help='input batch size')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=4)
-parser.add_argument('--nepoch', type=int, default=25, help='number of epochs to train for')
+parser.add_argument('--nepoch', type=int, default=10, help='number of epochs to train for')
 parser.add_argument('--model', type=str, default='', help='model path')
 parser.add_argument('--outf', type=str, default='seg', help='output folder')
 parser.add_argument('--dataset', type=str, required=True, help="dataset path")
 parser.add_argument('--class_choice', type=str, default='Chair', help="class_choice")
-parser.add_argument('--feature_transform', default='True', help="use feature transform")
+parser.add_argument('--feature_transform', action='store_true', help="use feature transform")
 parser.add_argument('--save_dir', default='../pretrained_networks', help='directory to save model weights')
 
 opt = parser.parse_args()
 print(opt)
-
+print(opt.feature_transform)
 opt.manualSeed = random.randint(1, 10000)  # fix seed
 print("Random Seed: ", opt.manualSeed)
 random.seed(opt.manualSeed)
@@ -71,7 +71,9 @@ classifier.cuda()
 
 classifier_loss = nn.NLLLoss()
 num_batch = len(dataloader)
-
+suf = 'false'
+if opt.feature_transform:
+    suf = 'true'
 for epoch in range(opt.nepoch):
     classifier.train()
     loss_sum = 0
@@ -85,9 +87,11 @@ for epoch in range(opt.nepoch):
         pred, trans, trans_feat = classifier(points)
         pred = pred.view(-1,num_classes)
         target = target.view(-1,1)[:,0]-1
-
+        #print(trans_feat)
         loss = F.nll_loss(pred, target)
         if opt.feature_transform:
+            # print("trans_feat is ")
+            # print(trans_feat)
             loss += feature_transform_regularizer(trans) * 0.001
         loss.backward()
         optimizer.step()
@@ -96,11 +100,17 @@ for epoch in range(opt.nepoch):
         pred_choice = pred.data.max(1)[1]
         total_correct += pred_choice.eq(target.data).cpu().sum()
         loss_sum += loss
-    print("Epoch: {} Loss is {} accuarancy is ".format(epoch, loss_sum / num_batch, total_correct.item() / float(opt.batchSize * num_batch * 2500)))
+    print("Epoch: {} Loss is {} accuarancy is {}".format(epoch, loss_sum / num_batch, total_correct.item() / float(opt.batchSize * num_batch * 2500)))
+
+    if epoch % 10 == 9:
+        torch.save({'model': classifier.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                    'epoch': epoch},
+                   os.path.join('/home/zbc/Assignment4/PointNet_Framework/codes/seg', str(epoch)+'_latest_segmentation_'+suf+'.pt'))
 
     torch.save({'model':classifier.state_dict(),
                 'optimizer': optimizer.state_dict(),
-                'epoch': epoch}, os.path.join(opt.save_dir, 'latest_segmentation.pt'))
+                'epoch': epoch}, os.path.join(opt.save_dir, 'latest_segmentation_'+suf+'.pt'))
 
 
 ## benchmark mIOU
@@ -112,7 +122,7 @@ for epoch in range(opt.nepoch):
             points = points.transpose(2, 1)
             points, target = points.cuda(), target.cuda()
             pred, _, _ = classifier(points)
-            pred_choice = pred.data.max(1)[1]
+            pred_choice = pred.data.max(2)[1]
 
             pred_np = pred_choice.cpu().data.numpy()
             target_np = target.cpu().data.numpy() - 1
